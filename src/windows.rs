@@ -87,6 +87,23 @@ impl Child {
     pub fn id(&self) -> u32 {
         self.child.id()
     }
+
+    pub(crate) fn try_wait(&self) -> io::Result<Option<ExitStatus>> {
+        unsafe {
+            match WaitForSingleObject(self.child.as_raw_handle(), 0) {
+                WAIT_OBJECT_0 => {}
+                WAIT_TIMEOUT => return Ok(None),
+                _ => return Err(io::Error::last_os_error()),
+            }
+            let mut status = 0;
+            let rc = GetExitCodeProcess(self.child.as_raw_handle(), &mut status);
+            if rc == FALSE {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(Some(ExitStatus::from_raw(status)))
+            }
+        }
+    }
 }
 
 impl Kill for Child {
@@ -106,11 +123,11 @@ impl Future for Child {
                     Async::Ready(()) => {}
                     Async::NotReady => return Ok(Async::NotReady),
                 }
-                let status = try!(try_wait(&self.child)).expect("not ready yet");
+                let status = try!(self.try_wait()).expect("not ready yet");
                 return Ok(status.into())
             }
 
-            if let Some(e) = try!(try_wait(&self.child)) {
+            if let Some(e) = try!(self.try_wait()) {
                 return Ok(e.into())
             }
             let (tx, rx) = oneshot::channel();
@@ -155,23 +172,6 @@ unsafe extern "system" fn callback(ptr: PVOID,
                                    _timer_fired: BOOLEAN) {
     let complete = &mut *(ptr as *mut Option<oneshot::Sender<()>>);
     let _ = complete.take().unwrap().send(());
-}
-
-pub fn try_wait(child: &process::Child) -> io::Result<Option<ExitStatus>> {
-    unsafe {
-        match WaitForSingleObject(child.as_raw_handle(), 0) {
-            WAIT_OBJECT_0 => {}
-            WAIT_TIMEOUT => return Ok(None),
-            _ => return Err(io::Error::last_os_error()),
-        }
-        let mut status = 0;
-        let rc = GetExitCodeProcess(child.as_raw_handle(), &mut status);
-        if rc == FALSE {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(Some(ExitStatus::from_raw(status)))
-        }
-    }
 }
 
 pub type ChildStdin = PollEvented<NamedPipe>;

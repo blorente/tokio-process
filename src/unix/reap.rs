@@ -49,6 +49,21 @@ impl<W, Q, S> Reaper<W, Q, S>
     }
 }
 
+impl<W, Q, S> Wait for Reaper<W, Q, S>
+where
+    W: Wait + Unpin,
+    Q: OrphanQueue<W>,
+{
+    fn id(&self) -> u32 {
+        self.inner().id()
+    }
+
+    fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        self.inner_mut().try_wait()
+    }
+}
+
+
 impl<W, Q, S> Future for Reaper<W, Q, S>
     where W: Wait,
           Q: OrphanQueue<W>,
